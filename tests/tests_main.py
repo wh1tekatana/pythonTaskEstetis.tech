@@ -1,45 +1,80 @@
-# tests/test_main.py
+# test_main.py
+import os
+from dotenv import load_dotenv
 from fastapi.testclient import TestClient
-from app.main import app
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+import sys
+print(sys.path)
+from app.main import app, get_db
+from app.database import Base
+from app.models import Courier
+
+
+# Загрузка переменных окружения из файла .env
+load_dotenv()
+
+# Получение значений переменных окружения из .env файла
+POSTGRES_PORT = os.getenv("POSTGRES_PORT")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST")
+
+
+# Создаем новую базу данных для тестов
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+
+# Создаем движок базы данных
+engine = create_engine(DATABASE_URL)
+
+# Создаем сессию
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+# Функция для получения базы данных в запросах
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
 
 client = TestClient(app)
 
-def test_create_courier():
+def test_get_available_courier():
+    # Создаем курьера с доступным районом
     response = client.post(
-        "/courier/",
-        json={"name": "John Doe", "districts": ["District 1", "District 2"]},
+        "/couriers/",
+        json={"name": "Test Courier", "districts": ["District1"], "active_order": None}
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "John Doe"
-    assert data["districts"] == ["District 1", "District 2"]
+    courier_id = data["id"]
 
-
-def test_get_courier():
-    response = client.get("/courier/1")
+    # Проверяем, что курьер доступен
+    response = client.get("/couriers/available/", params={"district": "District1"})
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == 1
-    assert "name" in data
-    assert "districts" in data
+    assert data["id"] == courier_id
 
-def test_update_courier():
-    response = client.put(
-        "/courier/1",
-        json={"name": "Updated Name", "districts": ["Updated District"]},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == 1
-    assert data["name"] == "Updated Name"
-    assert data["districts"] == ["Updated District"]
-
-def test_create_order():
+    # Создаем заказ с районом, соответствующим курьеру
     response = client.post(
-        "/order/",
-        json={"name": "Test Order", "district": "District 1"},
+        "/orders/",
+        json={"name": "Test Order", "district": "District1"}
     )
     assert response.status_code == 200
     data = response.json()
-    assert "order_id" in data
-    assert "courier_id" in data
+    order_id = data["id"]
+
+    # Проверяем, что курьеру был присвоен заказ
+    response = client.get(f"/couriers/{courier_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_order"] == order_id
+
+    # Проверяем, что курьер больше не доступен
+    response = client.get("/couriers/available/", params={"district": "District1"})
+    assert response.status_code == 404
