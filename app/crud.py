@@ -24,6 +24,13 @@ def create_order(db: Session, order: schemas.OrderCreate, courier_id: int):
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
+    
+    # Устанавливаем active_order курьера в order_id
+    db_courier = get_courier(db, courier_id)
+    db_courier.active_order = db_order.id
+    db.commit()
+    db.refresh(db_courier)
+    
     return db_order
 
 def complete_order(db: Session, order_id: int):
@@ -37,4 +44,8 @@ def get_courier_by_name(db: Session, name: str):
     return db.query(models.Courier).filter(models.Courier.name == name).first()
 
 def get_available_courier(db: Session, district: str):
-    return db.query(models.Courier).filter(models.Courier.districts.contains([district]), models.Courier.active_order.is_(None)).first()
+    # Проверяем, что active_order у курьера равен None и что район курьера соответствует заданному в запросе
+    return db.query(models.Courier).filter(
+        models.Courier.districts.contains([district]),
+        models.Courier.active_order.is_(None)
+    ).first()
